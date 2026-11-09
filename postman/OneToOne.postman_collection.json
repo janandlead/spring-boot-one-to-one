@@ -1,0 +1,349 @@
+{
+  "info": {
+    "name": "OneToOne Employee API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Employee/profile API on port 8082. Start the application with PostgreSQL configured, import this file into Postman, and run requests in order. The full collection creates a unique test employee, checks duplicate-email and lifecycle behavior, then deletes that employee. No authentication is configured. Edit baseUrl for another server. employeeId and employeeEmail are set automatically by the create request; avoid environment variables with those names. Request fields use phoneNumber and dateOfBirth; legacy phoneNumebr and dataOfBirth are also accepted. Assertions are provided but have not been run against a live server."
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "employeeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "employeeEmail",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Create employee with profile",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees",
+        "description": "Creates test data and stores employeeId for subsequent requests.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Alex\",\n  \"email\": \"{{employeeEmail}}\",\n  \"department\": \"Engineering\",\n  \"employeeProfileDto\": {\n    \"phoneNumber\": \"9876543210\",\n    \"address\": \"Hyderabad\",\n    \"dateOfBirth\": \"1995-04-12\",\n    \"emergencyContact\": \"9123456780\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"employeeEmail\", \"alex.\" + pm.variables.replaceIn(\"{{$guid}}\") + \"@example.com\");",
+              "pm.collectionVariables.set(\"employeeId\", \"\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 201\", function () { pm.response.to.have.status(201); });",
+              "pm.test(\"Employee and profile were saved\", function () { const data = pm.response.json(); pm.expect(data.id).to.be.a(\"number\"); pm.expect(data.name).to.eql(\"Alex\"); pm.expect(data.email).to.eql(pm.collectionVariables.get(\"employeeEmail\")); pm.expect(data.employeeProfileResponse.id).to.be.a(\"number\"); pm.collectionVariables.set(\"employeeId\", String(data.id)); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Reject duplicate email",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees",
+        "description": "",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Alex\",\n  \"email\": \"{{employeeEmail}}\",\n  \"department\": \"Engineering\",\n  \"employeeProfileDto\": {\n    \"phoneNumber\": \"9876543210\",\n    \"address\": \"Hyderabad\",\n    \"dateOfBirth\": \"1995-04-12\",\n    \"emergencyContact\": \"9123456780\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\", function () { pm.response.to.have.status(409); });",
+              "pm.test(\"Conflict details\", function () { const data = pm.response.json(); pm.expect(data.status).to.eql(409); pm.expect(data.error).to.eql(\"Conflict\"); pm.expect(data.message).to.include(pm.collectionVariables.get(\"employeeEmail\")); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 List employees",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"List contains the created employee\", function () { const data = pm.response.json(); pm.expect(data).to.be.an(\"array\"); pm.expect(data.some(e => String(e.id) === pm.collectionVariables.get(\"employeeId\"))).to.eql(true); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Get employee",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"Employee and profile details\", function () { const data = pm.response.json(); pm.expect(String(data.id)).to.eql(pm.collectionVariables.get(\"employeeId\")); pm.expect(data.employeeProfileResponse.dateOfBirth).to.eql(\"1995-04-12\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Update profile",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}/profile",
+        "description": "Replaces all profile fields. Omitted or null fields are cleared.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"address\": \"Bengaluru\",\n  \"dateOfBirth\": \"1995-04-12\",\n  \"emergencyContact\": \"9123456780\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"Profile updated\", function () { pm.expect(pm.response.json().employeeProfileResponse.address).to.eql(\"Bengaluru\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Delete profile",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}/profile",
+        "description": "Removes the profile while retaining the employee."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Verify profile removed",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"Employee remains without profile\", function () { const data = pm.response.json(); pm.expect(String(data.id)).to.eql(pm.collectionVariables.get(\"employeeId\")); pm.expect(data.employeeProfileResponse).to.eql(null); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Recreate profile",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}/profile",
+        "description": "",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"address\": \"Hyderabad\",\n  \"dateOfBirth\": \"1995-04-12\",\n  \"emergencyContact\": \"9123456780\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+              "pm.test(\"Profile recreated\", function () { pm.expect(pm.response.json().employeeProfileResponse.id).to.be.a(\"number\"); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Delete employee",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}",
+        "description": "Deletes the test employee and cascades deletion to its profile."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 204\", function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Verify employee removed",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/employees/{{employeeId}}",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 404\", function () { pm.response.to.have.status(404); });",
+              "pm.test(\"Not-found details\", function () { const data = pm.response.json(); pm.expect(data.status).to.eql(404); pm.expect(data.error).to.eql(\"Not Found\"); });"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
