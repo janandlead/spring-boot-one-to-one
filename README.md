@@ -31,6 +31,90 @@ PUT accepts just the nested profile object. The old request spellings `phoneNume
 
 Run `mvn test` for database-backed lifecycle tests using an isolated H2 database; PostgreSQL is not required for tests. Run `mvn spring-boot:run` to start the application against configured PostgreSQL.
 
+## Execution flow
+
+### Application startup
+
+1. `OneToOneApplication.main()` calls `SpringApplication.run()`.
+2. Spring Boot loads `application.properties`, including port `8082`, the PostgreSQL connection settings, and the password from `DB_PASSWORD`.
+3. Component scanning registers the controller, service, exception handler, and Spring Data repositories. Constructor injection connects the controller to `EmployeeServiceImpl` and the service to `EmployeeRepository`.
+4. Hibernate maps `Employee` and `EmployeeProfile` to their tables and updates the schema according to `spring.jpa.hibernate.ddl-auto=update`. PostgreSQL and the configured database must already be available.
+5. Once startup completes, the application accepts requests under `/api/v1/employees`.
+
+### Request and response path
+
+```mermaid
+sequenceDiagram
+    participant Client as Postman / client
+    participant MVC as Spring MVC
+    participant Controller as EmployeeController
+    participant Service as EmployeeServiceImpl
+    participant Repo as EmployeeRepository
+    participant DB as PostgreSQL
+    Client->>MVC: HTTP request with optional JSON body
+    MVC->>Controller: Match route and deserialize request DTO
+    Controller->>Service: Invoke employee operation
+    Note over Service: Spring opens a service transaction
+    Service->>Repo: Read, save, or delete employee
+    Repo->>DB: Execute SQL through JPA / Hibernate
+    DB-->>Repo: Rows or write result
+    Repo-->>Service: Entity or operation result
+    Note over Service: Map entities to response DTOs when needed
+    Note over Service: Flush pending changes and commit on success
+    Service-->>Controller: DTO, list, or completion
+    Controller-->>MVC: Response body and HTTP status
+    MVC-->>Client: JSON response or empty HTTP 204
+```
+
+The service uses `@Transactional`; read methods use `readOnly = true`. Profile details are mapped to response DTOs inside the service transaction, so lazy associations can be accessed during mapping. Entities are not returned directly to the client, avoiding recursive serialization of the bidirectional relationship. `saveAndFlush()` sends pending changes to the database before mapping the saved response; the transaction commits when the service invocation completes successfully.
+
+### How the one-to-one relationship works
+
+```mermaid
+erDiagram
+    EMPLOYEES ||--o| EMPLOYEE_PROFILES : has
+    EMPLOYEES {
+        bigint id PK
+        varchar name
+        varchar email UK
+        varchar department
+    }
+    EMPLOYEE_PROFILES {
+        bigint id PK
+        bigint employee_id FK, UK
+        varchar phone_number
+        varchar address
+        date date_of_birth
+        varchar emergency_contact
+    }
+```
+
+- `EmployeeProfile` owns the relationship: its `employee_id` column references `employees.id` and is both non-null and unique. Every profile belongs to exactly one employee, and an employee can have at most one profile.
+- `Employee.employeeProfile` is the inverse side, declared with `mappedBy = "employee"`. An employee may exist without a profile.
+- `Employee.setEmployeeProfile()` synchronizes both Java references. This ensures the owning profile has its employee reference before persistence.
+- `CascadeType.ALL` propagates persistence operations from employee to profile. `orphanRemoval = true` deletes a profile when it is removed from the employee relationship.
+- Employee and profile IDs are generated independently; they do not need to be equal.
+
+### Flow for each operation
+
+| Operation | Service execution | Result |
+| --- | --- | --- |
+| Create employee | Check `existsByEmail()`, populate the employee, optionally build and link its profile, then call `saveAndFlush()` and map the saved entities. | Employee and optional profile are saved together; HTTP 201 includes generated IDs. |
+| Get employee | `requireEmployee()` loads the entity by ID, then `toResponse()` maps it and its optional profile. | HTTP 200, or a missing-employee exception. |
+| List employees | `findAll()` loads employees and maps each to a response DTO. | HTTP 200 with an array, possibly empty. |
+| Update profile | Load the employee, reuse its existing profile or create and link one, copy all profile fields, then save and flush. | HTTP 200; an existing profile keeps its ID. Null or omitted fields clear their stored values. |
+| Delete profile | Load the managed employee and call `setEmployeeProfile(null)`. Hibernate detects the relationship change and removes the orphan at flush/commit. | Employee remains; HTTP 204. No explicit profile repository delete is needed. |
+| Delete employee | Load the employee and call `employeeRepository.delete()`. Deletion cascades to the associated profile. | Employee and profile are removed; HTTP 204. |
+
+### Error flow
+
+1. If the email pre-check finds an existing employee, the service throws `DuplicateEmployeeException`.
+2. If `requireEmployee()` cannot find an ID, it throws `EmployeeNotFoundException`.
+3. These runtime exceptions leave the service transaction through Spring's transaction interceptor, which rolls it back.
+4. `GlobalExceptionHandler` converts them to **409 Conflict** or **404 Not Found**, respectively. The JSON error includes `timestamp`, `status`, `error`, `message`, and `path`.
+
+The database also enforces unique emails and unique profile ownership. A database constraint violation, such as a duplicate caused by concurrent creation after the email pre-check, is not currently translated by these two custom exception handlers.
+
 ## Test with Postman
 
 1. Start PostgreSQL and ensure the configured `emp` database exists. Check the connection settings in `src/main/resources/application.properties`.
@@ -118,3 +202,4 @@ After deletion, PUT or DELETE requests for that same employee ID also return **4
 ```
 
 Expected: **201 Created** with `employeeProfileResponse` set to `null`. Use this employee's returned ID with the PUT request from step 4 to add a profile, then DELETE the employee when finished testing.
+
